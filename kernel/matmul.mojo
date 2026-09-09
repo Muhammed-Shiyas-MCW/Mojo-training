@@ -35,3 +35,7 @@ def main() raises:
 
     var report=run(benchmark,max_runtime_secs=0.5)
     report.print(Unit.ms)
+
+
+    print(c[0][0])
+    print(c[n-1][n-1])

@@ -27,6 +27,7 @@ def matrix_multiplication(a:List[List[Int]], b:List[List[Int]], mut c:List[List[
                 var b_vec2=b_ptr.unsafe_load[width=simd_w](j+simd_w)
                 var b_vec3=b_ptr.unsafe_load[width=simd_w](j+simd_w*2)
                 var b_vec4=b_ptr.unsafe_load[width=simd_w](j+simd_w*3)
+
                 var c_vec1=c_ptr.unsafe_load[width=simd_w](j)
                 var c_vec2=c_ptr.unsafe_load[width=simd_w](j+simd_w)
                 var c_vec3=c_ptr.unsafe_load[width=simd_w](j+simd_w*2)
