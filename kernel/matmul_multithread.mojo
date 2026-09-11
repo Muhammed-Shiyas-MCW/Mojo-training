@@ -92,19 +92,7 @@ def loop(n: Int) raises -> Float64:
 
 
 def main() raises:
-    # var sizes: List[Int] = [
-    #     8, 9, 16, 17, 32, 33, 64, 65,
-    #     128, 129, 256, 257, 512, 513,
-    #     1024, 1025, 2048, 2049
-    # ]
-
-    # print("Size (N x N)      Mean Time (ms)")
-    # print("--------------------------------")
-
-    # for i in range(len(sizes)):
-    #     var n = sizes[i]
-    #     var mean_ms = loop(n)
-    #     print(n, "           ", mean_ms, "ms")
-
+    
+    print(loop(512))
     print(loop(2048))
 
