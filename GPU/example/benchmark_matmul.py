@@ -3,14 +3,20 @@ from pathlib import Path
 
 import numpy as np
 
-from max.driver import CPU, Accelerator, Buffer, accelerator_count
+from max.driver import Accelerator, Buffer, accelerator_count
 from max.dtype import DType
 from max.engine import InferenceSession
 from max.graph import DeviceRef, Graph, TensorType, ops
 
 
-SIZES = [64, 128, 256, 512, 1024]
-COLUMNS = ["CPU naive", "GPU naive", "GPU tiled"]
+SIZES = [64, 128, 256, 512, 1024, 2048, 4096]
+KERNELS = [
+    ("GPU naive", "matmul_naive"),
+    ("GPU tiled", "matmul_tiled"),
+    ("GPU regtiled", "matmul_regtiled"),
+]
+# matmul_regtiled has no bounds checks, so every dim must be a multiple of BM/BN (64).
+REGTILED_MULTIPLE = 64
 COL_W = 26
 
 
@@ -61,45 +67,43 @@ def bench(device, op_name, m, k, n, warmup, iters):
     return elapsed / iters
 
 
-def cpu_repeats(size):
-    if size <= 128:
-        return 3, 20
-    if size <= 256:
-        return 2, 10
+def gpu_repeats(size):
     if size <= 512:
-        return 1, 3
-    return 1, 2
+        return 5, 50
+    if size <= 1024:
+        return 3, 20
+    if size <= 2048:
+        return 2, 10
+    return 1, 5
 
 
 def format_cell(seconds, baseline):
     if seconds is None:
         return "n/a".rjust(COL_W)
-    return f"{seconds * 1e3:9.4f} ms ({baseline / seconds:10.4f}x)"
+    return f"{seconds * 1e3:9.4f} ms ({baseline / seconds:8.2f}x)".rjust(COL_W)
 
 
 def main():
-    cpu = CPU()
-    gpu = Accelerator() if accelerator_count() > 0 else None
-    if gpu is None:
-        print("No GPU detected, the GPU columns will be empty.")
+    if accelerator_count() == 0:
+        print("No GPU detected, nothing to benchmark.")
+        return
+    gpu = Accelerator()
 
-    header = f"{'Size':>6} | " + " | ".join(name.rjust(COL_W) for name in COLUMNS)
+    print("Speedup is relative to GPU naive.")
+    header = f"{'Size':>6} | " + " | ".join(name.rjust(COL_W) for name, _ in KERNELS)
     print(header)
     print("-" * len(header))
 
     for size in SIZES:
-        warmup, iters = cpu_repeats(size)
-        baseline = bench(cpu, "matmul_naive", size, size, size, warmup, iters)
+        warmup, iters = gpu_repeats(size)
+        timings = []
+        for _, op_name in KERNELS:
+            if op_name == "matmul_regtiled" and size % REGTILED_MULTIPLE != 0:
+                timings.append(None)
+                continue
+            timings.append(bench(gpu, op_name, size, size, size, warmup, iters))
 
-        if gpu is None:
-            timings = [baseline, None, None]
-        else:
-            timings = [
-                baseline,
-                bench(gpu, "matmul_naive", size, size, size, 5, 30),
-                bench(gpu, "matmul_tiled", size, size, size, 5, 30),
-            ]
-
+        baseline = timings[0]
         cells = " | ".join(format_cell(t, baseline) for t in timings)
         print(f"{size:>6} | {cells}", flush=True)
 
