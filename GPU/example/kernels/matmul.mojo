@@ -246,3 +246,100 @@ struct MatMul_tiled:
 
         else:
             raise Error("Not implemented")
+
+
+
+
+
+
+
+
+
+
+#matmul register tiled
+
+
+
+
+comptime BM = 64
+comptime BN = 64
+comptime BK = 16
+comptime TM = 4
+comptime TN = 4
+comptime NUM_THREADS = (BM * BN)//(TM * TN)
+
+
+def gpu_matmul_regtiled[
+    dtype: DType, ALayout: TensorLayout, BLayout: TensorLayout, CLayout: TensorLayout,
+](
+    c: TileTensor[dtype, CLayout, MutAnyOrigin],
+    a: TileTensor[dtype, ALayout, MutAnyOrigin],
+    b: TileTensor[dtype, BLayout, MutAnyOrigin],
+    ctx: DeviceContext,
+) raises:
+    var m = Int(c.dim[0]())
+    var n = Int(c.dim[1]())
+    var k = Int(a.dim[1]())
+
+    @__parameter
+    def kernel(k_dim: Int32):
+        comptime assert a.flat_rank == 2 and b.flat_rank == 2 and c.flat_rank == 2
+
+        var tid = Int(thread_idx.x)
+        var block_row = Int(block_idx.y) *BM
+        var block_col = Int(block_idx.x) *BN
+        var thread_row = (tid // (BN//TN)) *TM
+        var thread_col = (tid % (BN // TN)) *TN
+
+        var a_tile = stack_allocation[dtype, address_space=AddressSpace.SHARED](row_major[BM, BK]())
+        var b_tile = stack_allocation[dtype, address_space=AddressSpace.SHARED](row_major[BK, BN]())
+        var acc = stack_allocation[dtype](row_major[TM, TN]()).fill(0)
+
+        for k_start in range(0, Int(k_dim), BK):
+            comptime for step in range(BM*BK//NUM_THREADS):
+                var idx = tid+step*NUM_THREADS
+                a_tile[idx//BK,idx %BK] = a[block_row + idx // BK, k_start + idx % BK]
+                b_tile[idx// BN, idx % BN] = b[k_start + idx // BN, block_col + idx % BN]
+
+
+
+
+            barrier()
+
+            
+
+            comptime for kk in range(BK):
+                comptime for i in range(TM):
+                    comptime for j in range(TN):
+                        acc[i, j] += rebind[acc.ElementType](
+                            a_tile[thread_row + i, kk] * b_tile[kk, thread_col + j])
+
+
+
+
+            barrier()
+
+        comptime for i in range(TM):
+            comptime for j in range(TN):
+                c[block_row+thread_row+i, block_col+thread_col+j] = rebind[c.ElementType](acc[i, j])
+
+    ctx.enqueue_function[kernel](
+        Int32(k),
+        grid_dim=(n//BN, m//BM),
+        block_dim=NUM_THREADS,
+    )
+
+
+@extensibility.register("matmul_regtiled")
+struct MatMul_regtiled:
+    @staticmethod
+    def execute[target: StaticString](
+        c: OutputTensor[rank=2, ...],
+        a: InputTensor[dtype=c.dtype, rank=c.rank, ...],
+        b: InputTensor[dtype=c.dtype, rank=c.rank, ...],
+        ctx: DeviceContext,
+    ) raises:
+        comptime if target == "gpu":
+            gpu_matmul_regtiled(c.to_tile_tensor(), a.to_tile_tensor(), b.to_tile_tensor(), ctx)
+        else:
+            raise Error("Not implemented")
